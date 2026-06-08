@@ -393,9 +393,26 @@ export default function LibrasTranslator() {
 
           {/* Error */}
           {error && (
-            <div className="error-alert animate-fade-in" style={{ marginBottom: 'var(--space-4)' }}>
-              <AlertCircle size={20} />
-              <span>{error}</span>
+            <div className="error-alert animate-fade-in" style={{ marginBottom: 'var(--space-4)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <AlertCircle size={20} />
+                <span>{error}</span>
+              </div>
+              <button
+                onClick={() => setError(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'inherit',
+                  cursor: 'pointer',
+                  fontSize: '1.5rem',
+                  padding: '0',
+                  lineHeight: '1',
+                }}
+                title="Fechar mensagem de erro"
+              >
+                ×
+              </button>
             </div>
           )}
 

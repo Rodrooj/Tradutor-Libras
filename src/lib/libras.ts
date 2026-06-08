@@ -19,7 +19,7 @@ export const NUM_FRAMES = 30;
 export const NUM_LANDMARKS = 33;
 export const NUM_COORDS = 3;
 export const NUM_FEATURES = NUM_LANDMARKS * NUM_COORDS; // 99
-export const NUM_CLASSES = 11;
+export const NUM_CLASSES = 10;
 export const CONFIDENCE_THRESHOLD = 0.7;
 
 // ---------------------------------------------------------------------------
@@ -134,11 +134,11 @@ export class FrameBuffer {
   }
   
   /**
-   * Remove os primeiros `count` frames do buffer (sliding window).
+   * Remove os primeiros N elementos do buffer (para overlapping windows).
+   * @param count Número de elementos a remover
    */
-  shift(count: number): void {
-    const toRemove = Math.min(count, this.buffer.length);
-    this.buffer.splice(0, toRemove);
+  shift(count: number = 1): void {
+    this.buffer.splice(0, Math.min(count, this.buffer.length));
   }
   
   /**
@@ -226,20 +226,16 @@ export async function runInference(
   }
   
   const inputTensor = tf.tensor3d(inputData, [1, NUM_FRAMES, NUM_FEATURES]);
-  let outputTensor: tf.Tensor | undefined;
   
-  try {
-    // Executar inferência
-    outputTensor = model.predict(inputTensor) as tf.Tensor;
-    const outputData = await outputTensor.data();
-    return new Float32Array(outputData);
-  } finally {
-    // Limpar tensores
-    inputTensor.dispose();
-    if (outputTensor) {
-      outputTensor.dispose();
-    }
-  }
+  // Executar inferência
+  const outputTensor = model.predict(inputTensor) as tf.Tensor;
+  const outputData = await outputTensor.data();
+  
+  // Limpar tensores
+  inputTensor.dispose();
+  outputTensor.dispose();
+  
+  return new Float32Array(outputData);
 }
 
 // ---------------------------------------------------------------------------
@@ -256,13 +252,6 @@ export async function loadModelAssets(): Promise<ModelAssets> {
     fetch('/scaler.json'),
     fetch('/class_mapping.json'),
   ]);
-  
-  if (!scalerResponse.ok) {
-    throw new Error(`Falha ao carregar scaler.json: ${scalerResponse.status} ${scalerResponse.statusText}`);
-  }
-  if (!mappingResponse.ok) {
-    throw new Error(`Falha ao carregar class_mapping.json: ${mappingResponse.status} ${mappingResponse.statusText}`);
-  }
   
   const scaler: ScalerParams = await scalerResponse.json();
   const classMapping: ClassMapping = await mappingResponse.json();
@@ -327,5 +316,4 @@ export const SIGNAL_EMOJIS: Record<string, string> = {
   'Tchau': '👋',
   'Desculpa': '😔',
   'Por favor': '🤲',
-  'Parado': '🧍',
 };
