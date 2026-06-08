@@ -63,7 +63,7 @@ NUM_FRAMES = 30          # Frames por sequência
 NUM_LANDMARKS = 33       # Landmarks do MediaPipe Pose
 NUM_COORDS = 3           # x, y, z
 NUM_FEATURES = NUM_LANDMARKS * NUM_COORDS  # 99
-NUM_CLASSES = 10         # Número de sinais
+NUM_CLASSES = 11         # Número de sinais
 
 # Parâmetros de treinamento
 EPOCHS = 50
@@ -87,7 +87,8 @@ CLASS_MAPPING = {
     6: "Tudo bem",
     7: "Tchau",
     8: "Desculpa",
-    9: "Por favor"
+    9: "Por favor",
+    10: "Parado"
 }
 
 # Diretórios de saída
@@ -508,6 +509,25 @@ def generate_por_favor(base_pose, rng):
     return np.array(frames)
 
 
+def generate_parado(base_pose, rng):
+    """
+    Sinal: PARADO (Idle)
+    Descrição: Postura neutra, braços relaxados ao longo do corpo.
+    Apenas pequena variação natural de postura.
+    """
+    frames = []
+    for f in range(NUM_FRAMES):
+        pose = base_pose.copy()
+        
+        # Leve respiração (movimento no eixo Y dos ombros)
+        breath_y = 0.005 * np.sin(2 * np.pi * (f / NUM_FRAMES))
+        pose[L_SHOULDER][1] += breath_y
+        pose[R_SHOULDER][1] += breath_y
+        
+        frames.append(pose.flatten())
+    return np.array(frames)
+
+
 # ---------------------------------------------------------------------------
 # Data Augmentation
 # ---------------------------------------------------------------------------
@@ -580,6 +600,7 @@ SIGNAL_GENERATORS = {
     7: generate_tchau,
     8: generate_desculpa,
     9: generate_por_favor,
+    10: generate_parado,
 }
 
 def generate_dataset():
@@ -715,8 +736,13 @@ def _export_tfjs_manual(model, output_dir):
     for layer in model.layers:
         for w in layer.weights:
             w_np = w.numpy()
+            
+            w_name = w.name
+            if '/' not in w_name:
+                w_name = f"{layer.name}/{w_name}"
+            
             weights_specs.append({
-                "name": w.name,
+                "name": w_name,
                 "shape": list(w_np.shape),
                 "dtype": "float32"
             })
@@ -731,6 +757,13 @@ def _export_tfjs_manual(model, output_dir):
     
     # Construir model.json (formato Keras layers)
     model_config = json.loads(model.to_json())
+    
+    # Keras 3 Compatibility Patch: Rename 'batch_shape' to 'batch_input_shape' for TF.js
+    if "config" in model_config and "layers" in model_config["config"]:
+        for layer_config in model_config["config"]["layers"]:
+            if layer_config.get("class_name") == "InputLayer":
+                if "batch_shape" in layer_config["config"]:
+                    layer_config["config"]["batch_input_shape"] = layer_config["config"].pop("batch_shape")
     
     model_json = {
         "format": "layers-model",

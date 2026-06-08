@@ -7,7 +7,6 @@ import {
   VolumeX,
   ArrowLeft,
   AlertCircle,
-  CheckCircle,
   Clock,
   Loader2,
   Info,
@@ -61,6 +60,10 @@ export default function LibrasTranslator() {
   const [predictions, setPredictions] = useState<PredictionResult[]>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const soundEnabledRef = useRef(soundEnabled);
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
   const [fps, setFps] = useState(0);
   const [bufferProgress, setBufferProgress] = useState(0);
 
@@ -186,8 +189,8 @@ export default function LibrasTranslator() {
         // Run inference when buffer is full
         if (buffer.isFull() && modelAssetsRef.current && !isProcessingRef.current) {
           const now = performance.now();
-          // Throttle: min 500ms between predictions
-          if (now - lastPredictionTimeRef.current > 500) {
+          // Throttle: min 2000ms between predictions to allow narrator to finish
+          if (now - lastPredictionTimeRef.current > 2000) {
             isProcessingRef.current = true;
             lastPredictionTimeRef.current = now;
 
@@ -208,8 +211,8 @@ export default function LibrasTranslator() {
                 setCurrentPrediction(prediction);
                 setPredictions((prev) => [prediction, ...prev].slice(0, 20));
 
-                // Speak the signal
-                if (soundEnabled) {
+                // Speak the signal, unless it is "Parado"
+                if (soundEnabledRef.current && prediction.signal !== 'Parado') {
                   speakSignal(prediction.signal, {
                     onEnd: () => setIsSpeaking(false),
                   });
@@ -218,9 +221,7 @@ export default function LibrasTranslator() {
               }
 
               // Clear half the buffer for overlapping windows
-              for (let i = 0; i < NUM_FRAMES / 2; i++) {
-                buffer.getData(); // just shift
-              }
+              buffer.shift(NUM_FRAMES / 2);
             } catch (err) {
               console.error('Erro na inferência:', err);
             } finally {
@@ -239,10 +240,10 @@ export default function LibrasTranslator() {
         fpsCounterRef.current.lastTime = now;
       }
     },
-    [soundEnabled]
+    [] // Dependencies optimized using refs
   );
 
-  // Update the pose callback when soundEnabled changes
+  // Update the pose callback when onPoseResults changes
   useEffect(() => {
     if (poseRef.current) {
       poseRef.current.onResults(onPoseResults);
@@ -324,6 +325,13 @@ export default function LibrasTranslator() {
   useEffect(() => {
     return () => {
       stopCamera();
+      if (poseRef.current) {
+        poseRef.current.close();
+        poseRef.current = null;
+      }
+      if (modelAssetsRef.current?.model) {
+        modelAssetsRef.current.model.dispose();
+      }
     };
   }, [stopCamera]);
 

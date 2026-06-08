@@ -22,6 +22,7 @@ vi.mock('./lib/libras', () => ({
     push = vi.fn();
     isFull = vi.fn().mockReturnValue(false);
     getData = vi.fn().mockReturnValue([]);
+    shift = vi.fn();
     clear = vi.fn();
   },
   extractLandmarks: vi.fn(),

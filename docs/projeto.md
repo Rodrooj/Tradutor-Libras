@@ -197,6 +197,11 @@ steps:
 
 ## 5. Resultados de Treinamento e Limitações (Protótipo)
 
+### Fix: TF.js Model Loading Bug
+- **Issue**: The browser application failed to load the generated `model.json` with the error `Falha ao carregar o modelo de IA`.
+- **Root Cause**: The Python environment upgraded to Keras 3 (TensorFlow 2.16+), which fundamentally changed how layer weights are internally named during `model.to_json()` exports. The layer path prefixes (e.g., `lstm/lstm_cell/kernel`) were stripped to just `kernel`. The frontend's `@tensorflow/tfjs` strict parser failed silently when attempting to map these weights back to the LSTM and Dense layers, resulting in the generic catch block error.
+- **Resolution**: Updated `train_libras_model.py`'s manual export logic to detect missing prefixes and dynamically re-inject the `lstm_cell/` and component names into the Keras 3 weights manifest, ensuring backwards compatibility with TF.js. Model loading was fully restored.
+
 ### 5.1. Dataset e Treinamento
 
 Para prova de conceito (PoC), utilizou-se um dataset **sintético**:

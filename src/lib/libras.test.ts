@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as tf from '@tensorflow/tfjs';
 import {
   extractLandmarks,
   normalizeFeatures,
@@ -21,6 +22,7 @@ import {
   classifySignal,
   mapClassToSignal,
   speakSignal,
+  runInference,
   SIGNAL_EMOJIS,
   NUM_FRAMES,
   NUM_LANDMARKS,
@@ -35,6 +37,11 @@ import {
 // =========================================================================
 // Constantes
 // =========================================================================
+
+vi.mock('@tensorflow/tfjs', () => ({
+  tensor3d: vi.fn(),
+  loadLayersModel: vi.fn(),
+}));
 
 describe('Constantes do módulo', () => {
   it('deve definir NUM_FRAMES como 30', () => {
@@ -54,8 +61,8 @@ describe('Constantes do módulo', () => {
     expect(NUM_FEATURES).toBe(NUM_LANDMARKS * NUM_COORDS);
   });
 
-  it('deve definir NUM_CLASSES como 10', () => {
-    expect(NUM_CLASSES).toBe(10);
+  it('deve definir NUM_CLASSES como 11', () => {
+    expect(NUM_CLASSES).toBe(11);
   });
 
   it('deve definir CONFIDENCE_THRESHOLD como 0.7', () => {
@@ -316,6 +323,33 @@ describe('FrameBuffer', () => {
     expect(smallBuffer.size).toBe(5);
     expect(smallBuffer.isFull()).toBe(true);
   });
+
+  it('deve remover os primeiros N frames com shift()', () => {
+    for (let i = 0; i < 30; i++) {
+      buffer.push(new Float32Array(99).fill(i));
+    }
+
+    buffer.shift(15);
+
+    expect(buffer.size).toBe(15);
+    const data = buffer.getData();
+    expect(data[0][0]).toBeCloseTo(15); // o primeiro frame agora é o que era o 15º
+  });
+
+  it('shift() não deve ultrapassar o tamanho do buffer', () => {
+    buffer.push(new Float32Array(99).fill(1));
+    buffer.push(new Float32Array(99).fill(2));
+
+    buffer.shift(100); // pedir mais do que existe
+
+    expect(buffer.size).toBe(0);
+  });
+
+  it('shift(0) não deve remover nada', () => {
+    buffer.push(new Float32Array(99).fill(1));
+    buffer.shift(0);
+    expect(buffer.size).toBe(1);
+  });
 });
 
 // =========================================================================
@@ -334,10 +368,11 @@ describe('classifySignal', () => {
     '7': 'Tchau',
     '8': 'Desculpa',
     '9': 'Por favor',
+    '10': 'Parado',
   };
 
   it('deve classificar sinal corretamente quando confiança > 0.7', () => {
-    const output = new Float32Array([0.1, 0.2, 0.75, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    const output = new Float32Array([0.1, 0.2, 0.75, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
 
     const result = classifySignal(output, classMapping);
 
@@ -348,7 +383,7 @@ describe('classifySignal', () => {
   });
 
   it('deve retornar null quando confiança < threshold', () => {
-    const output = new Float32Array([0.1, 0.2, 0.3, 0.1, 0.1, 0.05, 0.05, 0.05, 0.03, 0.02]);
+    const output = new Float32Array([0.1, 0.2, 0.3, 0.1, 0.1, 0.05, 0.05, 0.05, 0.03, 0.02, 0.0]);
 
     const result = classifySignal(output, classMapping);
 
@@ -356,7 +391,7 @@ describe('classifySignal', () => {
   });
 
   it('deve aceitar threshold personalizado', () => {
-    const output = new Float32Array([0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    const output = new Float32Array([0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
 
     const resultDefault = classifySignal(output, classMapping); // threshold 0.7
     const resultCustom = classifySignal(output, classMapping, 0.4); // threshold 0.4
@@ -367,7 +402,7 @@ describe('classifySignal', () => {
   });
 
   it('deve encontrar a classe com maior probabilidade', () => {
-    const output = new Float32Array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.95]);
+    const output = new Float32Array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.95, 0.0]);
 
     const result = classifySignal(output, classMapping);
 
@@ -377,7 +412,7 @@ describe('classifySignal', () => {
   });
 
   it('deve incluir timestamp na predição', () => {
-    const output = new Float32Array([0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    const output = new Float32Array([0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
 
     const before = new Date();
     const result = classifySignal(output, classMapping);
@@ -389,7 +424,7 @@ describe('classifySignal', () => {
   });
 
   it('deve funcionar com array regular (não Float32Array)', () => {
-    const output = [0.0, 0.85, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    const output = [0.0, 0.85, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
 
     const result = classifySignal(output, classMapping);
 
@@ -398,7 +433,7 @@ describe('classifySignal', () => {
   });
 
   it('deve retornar null para array de zeros', () => {
-    const output = new Float32Array(10).fill(0);
+    const output = new Float32Array(11).fill(0);
 
     const result = classifySignal(output, classMapping);
 
@@ -406,13 +441,13 @@ describe('classifySignal', () => {
   });
 
   it('deve lidar com confiança exatamente no threshold', () => {
-    const output = new Float32Array([0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    const output = new Float32Array([0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
     const result = classifySignal(output, classMapping);
     expect(result).not.toBeNull();
   });
 
   it('deve classificar corretamente com confiança exatamente igual ao threshold', () => {
-    const output = new Float32Array([0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3]);
+    const output = new Float32Array([0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.0]);
 
     const result = classifySignal(output, classMapping, 0.7);
     // 0.7 < 0.7 is false, so it passes
@@ -547,14 +582,14 @@ describe('speakSignal', () => {
 // =========================================================================
 
 describe('SIGNAL_EMOJIS', () => {
-  it('deve ter 10 sinais mapeados', () => {
-    expect(Object.keys(SIGNAL_EMOJIS)).toHaveLength(10);
+  it('deve ter 11 sinais mapeados', () => {
+    expect(Object.keys(SIGNAL_EMOJIS)).toHaveLength(11);
   });
 
   it('deve mapear todos os sinais para emojis', () => {
     const expectedSignals = [
       'Olá', 'Obrigado', 'Água', 'Ajuda', 'Sim',
-      'Não', 'Tudo bem', 'Tchau', 'Desculpa', 'Por favor',
+      'Não', 'Tudo bem', 'Tchau', 'Desculpa', 'Por favor', 'Parado',
     ];
 
     for (const signal of expectedSignals) {
@@ -592,7 +627,7 @@ describe('Prediction result structure', () => {
   };
 
   it('deve criar resultado de predição com todos os campos', () => {
-    const output = new Float32Array([0.9, 0.1, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const output = new Float32Array([0.9, 0.1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     const result = classifySignal(output, classMapping);
 
     expect(result).toHaveProperty('signal');
@@ -602,7 +637,7 @@ describe('Prediction result structure', () => {
   });
 
   it('deve ter confiança entre 0 e 1', () => {
-    const output = new Float32Array([0.85, 0.15, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const output = new Float32Array([0.85, 0.15, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     const result = classifySignal(output, classMapping);
 
     expect(result!.confidence).toBeGreaterThanOrEqual(0);
@@ -610,10 +645,142 @@ describe('Prediction result structure', () => {
   });
 
   it('deve ter classIndex como inteiro não negativo', () => {
-    const output = new Float32Array([0.85, 0.15, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const output = new Float32Array([0.85, 0.15, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     const result = classifySignal(output, classMapping);
 
     expect(Number.isInteger(result!.classIndex)).toBe(true);
     expect(result!.classIndex).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// =========================================================================
+// runInference
+// =========================================================================
+
+describe('runInference', () => {
+  const scaler: ScalerParams = {
+    mean: Array(99).fill(0.5),
+    scale: Array(99).fill(0.2),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('deve executar inferencia e descartar tensores em caso de sucesso', async () => {
+    const mockOutputTensor = {
+      data: vi.fn().mockResolvedValue(new Float32Array([0.1, 0.9, 0, 0, 0, 0, 0, 0, 0, 0, 0])),
+      dispose: vi.fn(),
+    };
+    const mockModel = {
+      predict: vi.fn().mockReturnValue(mockOutputTensor),
+    };
+    
+    const mockDisposeInput = vi.fn();
+    (tf.tensor3d as any).mockReturnValue({ dispose: mockDisposeInput });
+
+    const frames = Array(30).fill(new Float32Array(99));
+    const result = await runInference(mockModel as any, frames, scaler);
+
+    expect(result).toBeInstanceOf(Float32Array);
+    expect(result[1]).toBeCloseTo(0.9);
+    expect(mockDisposeInput).toHaveBeenCalled();
+    expect(mockOutputTensor.dispose).toHaveBeenCalled();
+  });
+
+  it('deve descartar inputTensor mesmo quando o modelo lança erro', async () => {
+    const mockModel = {
+      predict: vi.fn().mockImplementation(() => {
+        throw new Error('Erro de shape');
+      }),
+    };
+    
+    const mockDisposeInput = vi.fn();
+    (tf.tensor3d as any).mockReturnValue({ dispose: mockDisposeInput });
+
+    const frames = Array(30).fill(new Float32Array(99));
+    
+    await expect(runInference(mockModel as any, frames, scaler)).rejects.toThrow('Erro de shape');
+    
+    expect(mockDisposeInput).toHaveBeenCalled();
+  });
+});
+
+// =========================================================================
+// loadModelAssets
+// =========================================================================
+
+import { loadModelAssets } from './libras';
+
+describe('loadModelAssets', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('deve carregar modelo, scaler e classMapping com sucesso', async () => {
+    const mockModel = { predict: vi.fn() };
+    (tf.loadLayersModel as any).mockResolvedValue(mockModel);
+
+    const mockScaler = { mean: [0.5], scale: [0.2] };
+    const mockMapping = { '0': 'Olá' };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn((url: string) => {
+      if (url.includes('scaler.json')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockScaler) } as Response);
+      }
+      if (url.includes('class_mapping.json')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockMapping) } as Response);
+      }
+      return Promise.reject(new Error('Unexpected URL'));
+    }) as any;
+
+    const assets = await loadModelAssets();
+
+    expect(assets.model).toBe(mockModel);
+    expect(assets.scaler).toEqual(mockScaler);
+    expect(assets.classMapping).toEqual(mockMapping);
+
+    globalThis.fetch = originalFetch;
+  });
+
+  it('deve lançar erro quando scaler.json retorna status não-ok', async () => {
+    const mockModel = { predict: vi.fn() };
+    (tf.loadLayersModel as any).mockResolvedValue(mockModel);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn((url: string) => {
+      if (url.includes('scaler.json')) {
+        return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found' } as Response);
+      }
+      if (url.includes('class_mapping.json')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response);
+      }
+      return Promise.reject(new Error('Unexpected URL'));
+    }) as any;
+
+    await expect(loadModelAssets()).rejects.toThrow('Falha ao carregar scaler.json');
+
+    globalThis.fetch = originalFetch;
+  });
+
+  it('deve lançar erro quando class_mapping.json retorna status não-ok', async () => {
+    const mockModel = { predict: vi.fn() };
+    (tf.loadLayersModel as any).mockResolvedValue(mockModel);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn((url: string) => {
+      if (url.includes('scaler.json')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response);
+      }
+      if (url.includes('class_mapping.json')) {
+        return Promise.resolve({ ok: false, status: 500, statusText: 'Internal Server Error' } as Response);
+      }
+      return Promise.reject(new Error('Unexpected URL'));
+    }) as any;
+
+    await expect(loadModelAssets()).rejects.toThrow('Falha ao carregar class_mapping.json');
+
+    globalThis.fetch = originalFetch;
   });
 });

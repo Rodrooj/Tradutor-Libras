@@ -15,7 +15,7 @@
  * - Acessibilidade
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -36,6 +36,7 @@ vi.mock('../lib/libras', () => ({
     push = vi.fn();
     isFull = vi.fn().mockReturnValue(false);
     getData = vi.fn().mockReturnValue([]);
+    shift = vi.fn();
     clear = vi.fn();
   },
   extractLandmarks: vi.fn().mockReturnValue(new Float32Array(99)),
@@ -489,5 +490,178 @@ describe('Acessibilidade', () => {
     renderTranslator();
     const logo = document.getElementById('translator-header-logo');
     expect(logo!.getAttribute('tabindex')).toBe('0');
+  });
+});
+
+// =========================================================================
+// Modelo carregado com sucesso
+// =========================================================================
+
+describe('Modelo carregado com sucesso', () => {
+  it('deve habilitar botão iniciar quando modelo carrega', async () => {
+    const { loadModelAssets } = await import('../lib/libras');
+    (loadModelAssets as any).mockImplementationOnce(() =>
+      Promise.resolve({
+        model: { predict: vi.fn(), dispose: vi.fn() },
+        scaler: { mean: [], scale: [] },
+        classMapping: {},
+      })
+    );
+
+    await act(async () => {
+      renderTranslator();
+    });
+
+    // Aguardar o efeito do modelo carregar
+    await waitFor(() => {
+      const btn = document.getElementById('start-camera-btn') as HTMLButtonElement;
+      // O botão pode ficar habilitado se MediaPipe também carregou (mock do script.onload)
+      expect(btn).not.toBeNull();
+    });
+  });
+
+  it('deve mostrar "Modelo LSTM" como "Carregado" após sucesso', async () => {
+    const { loadModelAssets } = await import('../lib/libras');
+    (loadModelAssets as any).mockImplementationOnce(() =>
+      Promise.resolve({
+        model: { predict: vi.fn(), dispose: vi.fn() },
+        scaler: { mean: [], scale: [] },
+        classMapping: {},
+      })
+    );
+
+    await act(async () => {
+      renderTranslator();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Carregado')).toBeInTheDocument();
+    });
+  });
+});
+
+// =========================================================================
+// Câmera start/stop
+// =========================================================================
+
+describe('Câmera start/stop', () => {
+  it('deve chamar getUserMedia ao iniciar câmera', async () => {
+    const { loadModelAssets } = await import('../lib/libras');
+    (loadModelAssets as any).mockImplementationOnce(() =>
+      Promise.resolve({
+        model: { predict: vi.fn(), dispose: vi.fn() },
+        scaler: { mean: [], scale: [] },
+        classMapping: {},
+      })
+    );
+
+    const mockStream = {
+      getTracks: () => [{ stop: vi.fn() }],
+    };
+    const mockGetUserMedia = vi.fn().mockResolvedValue(mockStream);
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: mockGetUserMedia },
+      writable: true,
+      configurable: true,
+    });
+
+    await act(async () => {
+      renderTranslator();
+    });
+
+    // Esperar modelo e MediaPipe carregarem
+    await waitFor(() => {
+      const btn = document.getElementById('start-camera-btn') as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+
+    // Clicar para iniciar
+    await act(async () => {
+      fireEvent.click(document.getElementById('start-camera-btn')!);
+    });
+
+    expect(mockGetUserMedia).toHaveBeenCalledWith({
+      video: {
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+        facingMode: 'user',
+      },
+    });
+  });
+
+  it('deve mostrar erro se câmera for negada', async () => {
+    const { loadModelAssets } = await import('../lib/libras');
+    (loadModelAssets as any).mockImplementationOnce(() =>
+      Promise.resolve({
+        model: { predict: vi.fn(), dispose: vi.fn() },
+        scaler: { mean: [], scale: [] },
+        classMapping: {},
+      })
+    );
+
+    const mockGetUserMedia = vi.fn().mockRejectedValue(new Error('Permission denied'));
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: mockGetUserMedia },
+      writable: true,
+      configurable: true,
+    });
+
+    await act(async () => {
+      renderTranslator();
+    });
+
+    await waitFor(() => {
+      const btn = document.getElementById('start-camera-btn') as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+
+    await act(async () => {
+      fireEvent.click(document.getElementById('start-camera-btn')!);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Não foi possível acessar a câmera/)).toBeInTheDocument();
+    });
+  });
+
+  it('deve parar câmera ao clicar em parar', async () => {
+    const { loadModelAssets } = await import('../lib/libras');
+    (loadModelAssets as any).mockImplementationOnce(() =>
+      Promise.resolve({
+        model: { predict: vi.fn(), dispose: vi.fn() },
+        scaler: { mean: [], scale: [] },
+        classMapping: {},
+      })
+    );
+
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: vi.fn().mockRejectedValue(new Error('test')) },
+      writable: true,
+      configurable: true,
+    });
+
+    await act(async () => {
+      renderTranslator();
+    });
+
+    await waitFor(() => {
+      const btn = document.getElementById('start-camera-btn') as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+
+    // O botão parar deve estar desabilitado enquanto a câmera não está rodando
+    const stopBtn = document.getElementById('stop-camera-btn') as HTMLButtonElement;
+    expect(stopBtn.disabled).toBe(true);
+
+    // Tentar iniciar (vai falhar por causa do mock de erro)
+    await act(async () => {
+      fireEvent.click(document.getElementById('start-camera-btn')!);
+    });
+
+    // Depois do erro, o botão parar permanece desabilitado
+    await waitFor(() => {
+      expect(stopBtn.disabled).toBe(true);
+      expect(screen.getByText(/Não foi possível acessar a câmera/)).toBeInTheDocument();
+    });
   });
 });
