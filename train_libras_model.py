@@ -53,6 +53,7 @@ from tensorflow import keras
 from tensorflow.keras import layers
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
 
 # ---------------------------------------------------------------------------
 # Configuração
@@ -673,7 +674,7 @@ def build_model():
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=LEARNING_RATE),
         loss='sparse_categorical_crossentropy',
-        metrics=['accuracy']
+        metrics=['accuracy', tf.keras.metrics.Precision(name='precision'), tf.keras.metrics.Recall(name='recall')]
     )
     
     return model
@@ -719,6 +720,23 @@ def export_artifacts(model, scaler, X_test, y_test):
     loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
     print(f"  Loss:     {loss:.4f}")
     print(f"  Acurácia: {accuracy*100:.1f}%")
+
+    y_pred_probs = model.predict(X_test, verbose=0)
+    y_pred = np.argmax(y_pred_probs, axis=1)
+    report = classification_report(
+        y_test,
+        y_pred,
+        labels=list(CLASS_MAPPING.keys()),
+        target_names=list(CLASS_MAPPING.values()),
+        zero_division=0,
+    )
+    print("\n📊 Relatório de Classificação Detalhado:")
+    print(report)
+
+    report_path = os.path.join(OUTPUT_DIR, "classification_report.txt")
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write(report)
+    print(f"  ✅ Relatório de classificação salvo: {report_path}")
     
     return accuracy
 

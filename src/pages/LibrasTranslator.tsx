@@ -400,6 +400,7 @@ export default function LibrasTranslator() {
               </div>
               <button
                 onClick={() => setError(null)}
+                aria-label="Fechar mensagem de erro"
                 style={{
                   background: 'none',
                   border: 'none',
@@ -434,6 +435,8 @@ export default function LibrasTranslator() {
                   ref={canvasRef}
                   className="translator-canvas-overlay"
                   id="translator-canvas"
+                  role="img"
+                  aria-label="Visualização em tempo real dos landmarks corporais detectados"
                 />
 
                 {!isRunning && (
@@ -473,6 +476,8 @@ export default function LibrasTranslator() {
                   onClick={startCamera}
                   disabled={isRunning || !isReady}
                   id="start-camera-btn"
+                  aria-label="Iniciar câmera para captura de sinais de Libras"
+                  aria-pressed={isRunning}
                   style={{ flex: 1 }}
                 >
                   {modelLoading ? (
@@ -493,6 +498,8 @@ export default function LibrasTranslator() {
                   onClick={stopCamera}
                   disabled={!isRunning}
                   id="stop-camera-btn"
+                  aria-label="Parar a câmera"
+                  aria-pressed={!isRunning}
                 >
                   <CameraOff size={18} />
                   Parar
@@ -503,6 +510,8 @@ export default function LibrasTranslator() {
                   onClick={() => setSoundEnabled(!soundEnabled)}
                   title={soundEnabled ? 'Desativar som' : 'Ativar som'}
                   id="toggle-sound-btn"
+                  aria-label={soundEnabled ? 'Desativar síntese de voz' : 'Ativar síntese de voz'}
+                  aria-pressed={soundEnabled}
                 >
                   {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
                 </button>
