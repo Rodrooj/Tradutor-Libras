@@ -49,6 +49,7 @@ export default function LibrasTranslator() {
   const streamRef = useRef<MediaStream | null>(null);
   const lastPredictionTimeRef = useRef<number>(0);
   const isProcessingRef = useRef(false);
+  const isRunningRef = useRef(false);
 
   // State
   const [isRunning, setIsRunning] = useState(false);
@@ -252,6 +253,13 @@ export default function LibrasTranslator() {
 
   // ---- Processing Loop ----
   const processFrame = useCallback(async () => {
+    // A chamada a pose.send é assíncrona. Verificar a ref antes e depois
+    // evita que uma parada durante o processamento recrie o RAF.
+    if (!isRunningRef.current) {
+      animationFrameRef.current = null;
+      return;
+    }
+
     const video = videoRef.current;
     const pose = poseRef.current;
 
@@ -259,18 +267,25 @@ export default function LibrasTranslator() {
       try {
         await pose.send({ image: video });
       } catch (err) {
-        // MediaPipe can throw on some frames, just skip
+        // MediaPipe pode falhar em frames isolados; o loop continua ativo.
       }
     }
 
-    animationFrameRef.current = requestAnimationFrame(processFrame);
+    if (isRunningRef.current) {
+      animationFrameRef.current = requestAnimationFrame(processFrame);
+    } else {
+      animationFrameRef.current = null;
+    }
   }, []);
 
   // ---- Start Camera ----
   const startCamera = useCallback(async () => {
+    if (isRunningRef.current) return;
+
+    let stream: MediaStream | null = null;
     try {
       setError(null);
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 640 },
           height: { ideal: 480 },
@@ -285,11 +300,19 @@ export default function LibrasTranslator() {
         await videoRef.current.play();
       }
 
+      isRunningRef.current = true;
       setIsRunning(true);
       frameBufferRef.current.clear();
+      lastPredictionTimeRef.current = 0;
       setBufferProgress(0);
       animationFrameRef.current = requestAnimationFrame(processFrame);
     } catch (err) {
+      // Se play() falhar depois da permissão, não deixar a câmera aberta.
+      stream?.getTracks().forEach((track) => track.stop());
+      if (streamRef.current === stream) streamRef.current = null;
+      if (videoRef.current?.srcObject === stream) videoRef.current.srcObject = null;
+      isRunningRef.current = false;
+      setIsRunning(false);
       console.error('Erro ao acessar câmera:', err);
       setError(
         'Não foi possível acessar a câmera. Verifique as permissões do navegador.'
@@ -299,6 +322,9 @@ export default function LibrasTranslator() {
 
   // ---- Stop Camera ----
   const stopCamera = useCallback(() => {
+    // Sinalizar a parada antes de cancelar o RAF para cobrir callbacks em voo.
+    isRunningRef.current = false;
+
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
