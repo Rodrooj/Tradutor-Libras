@@ -78,14 +78,20 @@ export default function LibrasTranslator() {
       'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js',
       'https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js',
     ];
+    let cancelled = false;
 
-    let loadedCount = 0;
-
-    scripts.forEach((src) => {
-      // Skip if already loaded
-      if (document.querySelector(`script[src="${src}"]`)) {
-        loadedCount++;
-        if (loadedCount === scripts.length) setMediaPipeLoaded(true);
+    const loadScript = (src: string) => new Promise<void>((resolve, reject) => {
+      const existing = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
+      if (existing) {
+        // Um elemento existente pode ainda estar carregando. Só reutilizá-lo
+        // imediatamente quando o carregamento já foi concluído.
+        const readyState = (existing as HTMLScriptElement & { readyState?: string }).readyState;
+        if (existing.dataset.loaded === 'true' || readyState === 'complete') {
+          resolve();
+          return;
+        }
+        existing.addEventListener('load', () => resolve(), { once: true });
+        existing.addEventListener('error', () => reject(new Error(`Falha ao carregar ${src}`)), { once: true });
         return;
       }
 
@@ -93,36 +99,61 @@ export default function LibrasTranslator() {
       script.src = src;
       script.crossOrigin = 'anonymous';
       script.onload = () => {
-        loadedCount++;
-        if (loadedCount === scripts.length) {
-          setMediaPipeLoaded(true);
-        }
+        script.dataset.loaded = 'true';
+        resolve();
       };
-      script.onerror = () => {
-        setError('Falha ao carregar MediaPipe. Verifique sua conexão com a internet.');
-      };
+      script.onerror = () => reject(new Error(`Falha ao carregar ${src}`));
       document.head.appendChild(script);
     });
+
+    Promise.all(scripts.map(loadScript))
+      .then(() => {
+        if (!cancelled) setMediaPipeLoaded(true);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('Erro ao carregar MediaPipe:', err);
+          setError('Falha ao carregar MediaPipe. Verifique sua conexão com a internet.');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ---- Load Model ----
   useEffect(() => {
+    let cancelled = false;
+
     async function loadModel() {
       try {
         const assets = await loadModelAssets();
+
+        if (cancelled) {
+          // O componente pode ter sido desmontado enquanto os assets carregavam.
+          assets.model.dispose();
+          return;
+        }
+
         modelAssetsRef.current = assets;
         setModelLoaded(true);
       } catch (err) {
-        console.error('Erro ao carregar modelo:', err);
-        setError(
-          'Falha ao carregar o modelo de IA. Certifique-se de que os arquivos do modelo estão em /public/libras_model_tfjs/'
-        );
+        if (!cancelled) {
+          console.error('Erro ao carregar modelo:', err);
+          setError(
+            'Falha ao carregar o modelo de IA. Certifique-se de que os arquivos do modelo estão em /public/libras_model_tfjs/'
+          );
+        }
       } finally {
-        setModelLoading(false);
+        if (!cancelled) setModelLoading(false);
       }
     }
 
     loadModel();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ---- Initialize MediaPipe Pose ----
