@@ -40,7 +40,7 @@ vi.mock('../lib/libras', () => ({
     clear = vi.fn();
   },
   extractLandmarks: vi.fn().mockReturnValue(new Float32Array(99)),
-  runInference: vi.fn().mockResolvedValue(new Float32Array(10)),
+  runInference: vi.fn().mockResolvedValue(new Float32Array(11)),
   classifySignal: vi.fn().mockReturnValue(null),
   speakSignal: vi.fn().mockReturnValue(null),
   loadModelAssets: vi.fn().mockImplementation(() => new Promise(() => {})),
@@ -55,6 +55,7 @@ vi.mock('../lib/libras', () => ({
     'Tchau': '👋',
     'Desculpa': '😔',
     'Por favor': '🤲',
+    'Parado': '👤',
   },
   NUM_FRAMES: 30,
 }));
@@ -586,6 +587,48 @@ describe('Câmera start/stop', () => {
         height: { ideal: 480 },
         facingMode: 'user',
       },
+    });
+  });
+
+  it('deve liberar o stream se a reprodução do vídeo falhar', async () => {
+    const { loadModelAssets } = await import('../lib/libras');
+    (loadModelAssets as any).mockImplementationOnce(() =>
+      Promise.resolve({
+        model: { predict: vi.fn(), dispose: vi.fn() },
+        scaler: { mean: [], scale: [] },
+        classMapping: {},
+      })
+    );
+
+    const stopTrack = vi.fn();
+    const mockStream = { getTracks: () => [{ stop: stopTrack }] };
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: vi.fn().mockResolvedValue(mockStream) },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, 'srcObject', {
+      configurable: true,
+      get: () => null,
+      set: vi.fn(),
+    });
+    vi.spyOn(HTMLVideoElement.prototype, 'play').mockRejectedValueOnce(new Error('play failed'));
+
+    await act(async () => {
+      renderTranslator();
+    });
+
+    await waitFor(() => {
+      expect((document.getElementById('start-camera-btn') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    await act(async () => {
+      fireEvent.click(document.getElementById('start-camera-btn')!);
+    });
+
+    await waitFor(() => {
+      expect(stopTrack).toHaveBeenCalledOnce();
+      expect(screen.getByText(/Não foi possível acessar a câmera/)).toBeInTheDocument();
     });
   });
 

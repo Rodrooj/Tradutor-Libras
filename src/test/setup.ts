@@ -98,6 +98,18 @@ Object.defineProperty(HTMLVideoElement.prototype, 'pause', {
   writable: true,
 });
 
+// O happy-dom exige uma instância real de MediaStream no setter nativo. Como
+// os testes usam streams mínimos, mantemos um armazenamento compatível local.
+Object.defineProperty(HTMLVideoElement.prototype, 'srcObject', {
+  configurable: true,
+  get(this: HTMLVideoElement) {
+    return (this as HTMLVideoElement & { __srcObject?: MediaProvider }).__srcObject ?? null;
+  },
+  set(this: HTMLVideoElement, value: MediaProvider | null) {
+    (this as HTMLVideoElement & { __srcObject?: MediaProvider }).__srcObject = value ?? undefined;
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Mock: performance.now (para testes determinísticos)
 // ---------------------------------------------------------------------------
@@ -122,6 +134,7 @@ const mockClassMapping = {
   '7': 'Tchau',
   '8': 'Desculpa',
   '9': 'Por favor',
+  '10': 'Parado',
 };
 
 const mockScaler = {
